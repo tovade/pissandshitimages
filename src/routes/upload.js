@@ -100,7 +100,7 @@ router.post('/upload', upload.single('image'), async (req, res) => {
             }
         }
         
-        const style = resultStyles[processingResult.processingType] || resultStyles['MEDIUM_COMPRESSION']
+        const style = resultStyles[processingResult.processingType] || resultStyles['NORMAL_SHIT']
         
         // Prepare URL data for metadata
         const baseUrl = `${req.protocol}://${req.get('host')}`
