@@ -20,7 +20,7 @@ async function processImageRandomly(buffer, mimetype) {
         const processedResult = await applyHeavyCompression(buffer, mimetype)
         result = {
             ...processedResult,
-            processingType: 'HEAVY_COMPRESSION',
+            processingType: 'EXTREME_NUCLEAR',
             randomValue: randomValue.toFixed(2),
             resultMessage: 'Image processed with heavy compression'
         }
@@ -30,7 +30,7 @@ async function processImageRandomly(buffer, mimetype) {
         const processedResult = await applyMediumCompression(buffer, mimetype)
         result = {
             ...processedResult,
-            processingType: 'MEDIUM_COMPRESSION',
+            processingType: 'NORMAL_SHIT',
             randomValue: randomValue.toFixed(2),
             resultMessage: 'Image processed with medium compression'
         }
@@ -40,7 +40,7 @@ async function processImageRandomly(buffer, mimetype) {
         result = {
             buffer,
             mimetype,
-            processingType: 'ORIGINAL',
+            processingType: 'LUCKY_SURVIVOR',
             randomValue: randomValue.toFixed(2),
             resultMessage: 'Image kept in original quality'
         }
