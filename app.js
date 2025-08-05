@@ -28,18 +28,18 @@ app.use('/', uploadRoutes)      // Home page and upload
 app.use('/', galleryRoutes)     // Gallery page
 app.use('/', imageRoutes)       // Individual image display
 
-// 404 handler with brainrot styling
+// 404 handler
 app.use((req, res) => {
     res.status(404).send(`
         <!DOCTYPE html>
         <html>
         <head>
-            <title>404 - Not Found 💀</title>
+            <title>404 - Page Not Found</title>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
                 body {
-                    font-family: 'Comic Sans MS', cursive, sans-serif;
-                    background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                     color: white;
                     text-align: center;
                     padding: 50px;
@@ -51,42 +51,38 @@ app.use((req, res) => {
                     align-items: center;
                 }
                 h1 {
-                    font-size: clamp(2rem, 8vw, 6rem);
+                    font-size: 4rem;
                     margin-bottom: 20px;
-                    text-shadow: 3px 3px 0px #333;
-                    animation: bounce 2s ease-in-out infinite;
-                }
-                @keyframes bounce {
-                    0%, 100% { transform: translateY(0px); }
-                    50% { transform: translateY(-20px); }
+                    text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
                 }
                 p {
-                    font-size: clamp(1rem, 3vw, 2rem);
+                    font-size: 1.2rem;
                     margin: 20px 0;
+                    opacity: 0.9;
                 }
                 a {
-                    color: #ffeb3b;
+                    color: #fff;
                     text-decoration: none;
                     font-weight: bold;
-                    font-size: clamp(1.2rem, 3vw, 2rem);
+                    font-size: 1.1rem;
                     background: rgba(255,255,255,0.2);
                     padding: 15px 30px;
-                    border-radius: 50px;
+                    border-radius: 25px;
                     display: inline-block;
                     margin-top: 30px;
                     transition: all 0.3s ease;
+                    border: 1px solid rgba(255,255,255,0.3);
                 }
                 a:hover {
-                    background: rgba(255,255,255,0.4);
-                    transform: scale(1.1);
+                    background: rgba(255,255,255,0.3);
+                    transform: translateY(-2px);
                 }
             </style>
         </head>
         <body>
-            <h1>404 💀</h1>
-            <p>This page got obliterated by the casino!</p>
-            <p>Even our 404 pages aren't safe from destruction!</p>
-            <a href="/">Return to Casino 🎰</a>
+            <h1>404</h1>
+            <p>The page you're looking for doesn't exist.</p>
+            <a href="/">Return to Home</a>
         </body>
         </html>
     `)
@@ -94,31 +90,30 @@ app.use((req, res) => {
 
 // Error handler
 app.use((error, req, res, next) => {
-    console.error('💀 Server error:', error)
+    console.error('Server error:', error)
     
     // Multer file size error
     if (error.code === 'LIMIT_FILE_SIZE') {
         return res.status(413).send(`
-            <h1 style="font-family: Comic Sans MS; color: #ff6b6b;">FILE TOO THICC! 🍰</h1>
-            <p style="font-family: Comic Sans MS;">Your image is too large! Keep it under 10MB, bestie!</p>
-            <a href="/" style="font-family: Comic Sans MS; color: #4ecdc4;">Go back and try again 🔙</a>
+            <h1 style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: #dc3545;">File Too Large</h1>
+            <p style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">Please upload an image smaller than 10MB.</p>
+            <a href="/" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: #007bff; text-decoration: none;">← Go back</a>
         `)
     }
     
     // General error
     res.status(500).send(`
-        <h1 style="font-family: Comic Sans MS; color: #ff6b6b;">CASINO MACHINE BROKE! 💀</h1>
-        <p style="font-family: Comic Sans MS;">Something went wrong: ${error.message}</p>
-        <a href="/" style="font-family: Comic Sans MS; color: #4ecdc4;">Try again 🔄</a>
+        <h1 style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: #dc3545;">Server Error</h1>
+        <p style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">Something went wrong: ${error.message}</p>
+        <a href="/" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: #007bff; text-decoration: none;">← Try again</a>
     `)
 })
 
 // Start server
 app.listen(PORT, () => {
-    console.log('🎰💩🔥 PISSANDSHITIMAGES CASINO IS OPEN FOR BUSINESS! 🔥💩🎰')
-    console.log(`💸 The house always wins at http://localhost:${PORT}`)
-    console.log(`🎲 Current odds: 50% survival, 25% shit, 25% nuclear obliteration`)
-    console.log('🎪 LET THE GAMBLING BEGIN!')
+    console.log(`� Random Image Processor started`)
+    console.log(`� Server running at http://localhost:${PORT}`)
+    console.log(`📊 Processing odds: 50% original, 25% medium compression, 25% heavy compression`)
 })
 
 export default app

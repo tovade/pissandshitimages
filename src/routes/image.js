@@ -18,12 +18,12 @@ router.get('/image/:id', async (req, res) => {
             .limit(1)
         
         if (error) {
-            console.error('💀 Image fetch error:', error)
+            console.error('� Image fetch error:', error)
             return res.status(500).send('Database error while fetching image!')
         }
         
         if (!images || images.length === 0) {
-            return res.status(404).send('Image not found in the casino! 😭')
+            return res.status(404).send('Image not found! �')
         }
         
         const image = images[0]
@@ -46,16 +46,16 @@ router.get('/image/:id', async (req, res) => {
             // Return HTML page with image details
             
             // Parse metadata from mimetype field
-            let rollPercentage = 'Unknown'
-            let gamblingResult = 'UNKNOWN'
+            let randomValue = 'Unknown'
+            let processingType = 'UNKNOWN'
             let resultMessage = ''
             
-            if (image.mimetype.includes('roll:')) {
-                rollPercentage = image.mimetype.split('roll:')[1]?.split('|')[0] || 'Unknown'
+            if (image.mimetype.includes('random:')) {
+                randomValue = image.mimetype.split('random:')[1]?.split('|')[0] || 'Unknown'
             }
             
-            if (image.mimetype.includes('result:')) {
-                gamblingResult = image.mimetype.split('result:')[1]?.split('|')[0] || 'UNKNOWN'
+            if (image.mimetype.includes('type:')) {
+                processingType = image.mimetype.split('type:')[1]?.split('|')[0] || 'UNKNOWN'
             }
             
             if (image.mimetype.includes('msg:')) {
@@ -65,15 +65,21 @@ router.get('/image/:id', async (req, res) => {
             
             // Get result emoji and color
             const resultEmoji = {
-                'LUCKY_SURVIVOR': '🍀',
-                'NORMAL_SHIT': '💩',
+                'LUCKY_SURVIVOR': '✨',
+                'NORMAL_SHIT':  '💩',
                 'EXTREME_NUCLEAR': '💀'
             }
             
             const resultColor = {
-                'LUCKY_SURVIVOR': '#4caf50',
-                'NORMAL_SHIT': '#ff9800', 
-                'EXTREME_NUCLEAR': '#f44336'
+                'LUCKY_SURVIVOR': '#28a745',
+                'NORMAL_SHIT': '#17a2b8', 
+                'EXTREME_NUCLEAR': '#dc3545'
+            }
+
+            const resultText = {
+                'LUCKY_SURVIVOR': 'You lucky rn twin, im finna get yo ass next time 🫰',
+                'NORMAL_SHIT':  'you still kinda lucky, you got moderately fucked bro... Im finna destroy that shit next time.',
+                'EXTREME_NUCLEAR': 'You got nuclear shit bro, we gonna start digging in yo butt twin'
             }
             
             // Prepare URL data for metadata
@@ -83,19 +89,19 @@ router.get('/image/:id', async (req, res) => {
             res.send(renderTemplate('image', {
                 id: imageId,
                 mimetype: image.mimetype.split('|')[0] || 'image/jpeg',
-                createdAt: 'Some time in the casino multiverse 🎰✨',
-                rollPercentage,
-                gamblingResult,
-                resultMessage,
-                emoji: resultEmoji[gamblingResult] || '❓',
-                color: resultColor[gamblingResult] || '#666',
+                createdAt: 'Recently processed',
+                randomValue,
+                processingType: processingType.replace('_', ' '),
+                resultMessage: resultText[processingType],
+                emoji: resultEmoji[processingType] || '❓',
+                color: resultColor[processingType] || '#6c757d',
                 baseUrl,
                 currentUrl
             }))
         }
         
     } catch (error) {
-        console.error('💀 Image route error:', error)
+        console.error('� Image route error:', error)
         res.status(500).send(`Failed to load image! Error: ${error.message}`)
     }
 })

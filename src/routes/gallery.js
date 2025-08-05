@@ -1,82 +1,95 @@
 import express from 'express'
-import { supabase, base64ToBytes } from '../config/database.js'
+import { supabase } from '../config/database.js'
 import { renderTemplate } from '../utils/templateRenderer.js'
 
 const router = express.Router()
 
-// Gallery page route
+/**
+ * Gallery page - displays all processed images with statistics
+ */
 router.get('/gallery', async (req, res) => {
     try {
-        console.log('🖼️ Loading gallery of destruction...')
+        console.log('🖼️ Loading gallery page...')
         
         // Fetch all images from database, ordered by creation date (newest first)
         const { data: images, error } = await supabase
             .from('images')
-            .select('id, mimetype')
+            .select('*')
+            .order('id', { ascending: false })
         
         if (error) {
-            console.error('💀 Gallery fetch error:', error)
-            return res.status(500).send('Failed to load gallery! The casino database is having issues.')
+            console.error('❌ Database error:', error)
+            throw error
         }
         
         console.log(`📸 Found ${images.length} images in the gallery`)
         
         // Process images for template
         const processedImages = images.map(image => {
-            const resultEmoji = {
-                'LUCKY_SURVIVOR': '🍀',
-                'NORMAL_SHIT': '💩',
-                'EXTREME_NUCLEAR': '💀'
+            // Parse processing info from mimetype field  
+            let type = 'unknown'
+            let typeDisplay = 'Unknown Processing'
+            let rollInfo = 'N/A'
+            
+            if (image.mimetype?.includes('random:')) {
+                const parts = image.mimetype.split('random:')[1]
+                if (parts) {
+                    const [rollPart, typePart] = parts.split('-')
+                    rollInfo = rollPart || 'N/A'
+                    
+                    if (typePart?.includes('ORIGINAL')) {
+                        type = 'original'
+                        typeDisplay = '✨ Original Quality'
+                    } else if (typePart?.includes('MEDIUM_COMPRESSION')) {
+                        type = 'medium'
+                        typeDisplay = '📸 Medium Compression'
+                    } else if (typePart?.includes('HEAVY_COMPRESSION')) {
+                        type = 'heavy'
+                        typeDisplay = '🔥 Heavy Compression'
+                    }
+                }
             }
-            
-            const resultColor = {
-                'LUCKY_SURVIVOR': '#4caf50',
-                'NORMAL_SHIT': '#ff9800',
-                'EXTREME_NUCLEAR': '#f44336'
-            }
-            
-            const rollInfo = image.mimetype?.includes('roll:') 
-                ? image.mimetype.split('roll:')[1]?.split('|')[0] 
-                : 'Unknown'
-            
-            const resultType = image.mimetype?.includes('result:') 
-                ? image.mimetype.split('result:')[1]?.split('|')[0] 
-                : 'UNKNOWN'
             
             return {
-                ...image,
-                emoji: resultEmoji[resultType] || '❓',
-                color: resultColor[resultType] || '#666',
-                rollInfo,
-                date: 'Casino Time 🎰' // No timestamp? NO PROBLEM BESTIE
+                id: image.id,
+                type: type,
+                typeDisplay: typeDisplay,
+                rollInfo: rollInfo,
+                date: "some time..."
             }
         })
         
-        // Calculate statistics
-        const survivorCount = images.filter(img => img.mimetype?.includes('LUCKY_SURVIVOR')).length
-        const shittifiedCount = images.filter(img => img.mimetype?.includes('NORMAL_SHIT')).length
-        const obliteratedCount = images.filter(img => img.mimetype?.includes('EXTREME_NUCLEAR')).length
-        const unknownCount = images.filter(img => !img.mimetype?.includes('roll:')).length
+        // Calculate statistics for display
+        const originalCount = images.filter(img => img.mimetype?.includes('LUCKY_SURVIVOR')).length
+        const mediumCount = images.filter(img => img.mimetype?.includes('NORMAL_SHIT')).length
+        const heavyCount = images.filter(img => img.mimetype?.includes('EXTREME_NUCLEAR')).length
+        const unknownCount = images.filter(img => !img.mimetype?.includes('random:')).length
         
-        // Prepare URL data for metadata
-        const baseUrl = `${req.protocol}://${req.get('host')}`
-        const currentUrl = `${baseUrl}${req.originalUrl}`
-        
-        res.send(renderTemplate('gallery', {
+        // Render gallery template with all data
+        const templateData = {
+            currentUrl: `${req.protocol}://${req.get('host')}${req.originalUrl}`,
+            baseUrl: `${req.protocol}://${req.get('host')}`,
             imageCount: images.length,
             hasImages: images.length > 0,
             images: processedImages,
-            survivorCount,
-            shittifiedCount,
-            obliteratedCount,
-            unknownCount,
-            baseUrl,
-            currentUrl
-        }))
+            survivorCount: originalCount,
+            shittifiedCount: mediumCount, 
+            obliteratedCount: heavyCount,
+            unknownCount: unknownCount
+        }
+        
+        const html = await renderTemplate('gallery', templateData)
+        res.send(html)
         
     } catch (error) {
-        console.error('💀 Gallery error:', error)
-        res.status(500).send(`Gallery exploded! Error: ${error.message}`)
+        console.error('❌ Gallery error:', error)
+        res.status(500).send(`
+            <div style="text-align: center; padding: 50px; font-family: Arial;">
+                <h2>🚫 Gallery Unavailable</h2>
+                <p>Unable to load gallery. Please try again later.</p>
+                <a href="/" style="color: #007bff;">← Back to Upload</a>
+            </div>
+        `)
     }
 })
 

@@ -1,11 +1,12 @@
 {
-	"name": "pissandshitimages",
+	"name": "random-image-processor",
 	"version": "1.0.0",
-	"description": "THE PISSIEST AND SHITTIEST IMAGE UPLOAD SERVICE.",
+	"description": "A probabilistic image processing service with random quality transformations.",
 	"type": "module",
 	"main": "app.js",
 	"scripts": {
-		"start": "node app.js"
+		"start": "node app.js",
+		"dev": "node --watch app.js"
 	},
 	"dependencies": {
 		"@supabase/supabase-js": "^2.53.0",
