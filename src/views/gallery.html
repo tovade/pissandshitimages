@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Gallery - pissandshitimages</title>
+    <link rel="stylesheet" href="/css/main.css" />
+    <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  </head>
+  <body>
+    <script src="/oneko.js"></script>
+    <h1>🖼️ Gallery - pissandshitimages 💩</h1>
+    <div class="stats-container">
+      <div class="stats-grid">
+        <div class="stat-box">
+          <h3>🖼️ Image Counts</h3>
+          <p>Total Images: <span id="total-images"></span></p>
+          <p>Visible Images: <span id="visible-images"></span></p>
+          <p>Hidden Images: <span id="hidden-images"></span></p>
+        </div>
+        <div class="stat-box">
+          <h3>🎲 Roll Stats</h3>
+          <p>✨ Lucky Survivors: <span id="lucky-survivors"></span></p>
+          <p>💩 Normal Shit: <span id="normal-shit"></span></p>
+          <p>💀 Extreme Nuclear: <span id="extreme-nuclear"></span></p>
+        </div>
+        <div class="stat-box">
+          <h3>📦 Storage</h3>
+          <p>Total Size: <span id="total-size"></span> MB</p>
+          <p>Avg Size: <span id="avg-size"></span> KB per image</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="page-info">
+      <strong id="page-info"></strong>
+    </div>
+
+    <div class="nav-buttons">
+      <a href="/" class="upload-button" style="margin-right: 10px"
+        >📸 Upload More Shit!</a
+      >
+      <a href="/leaderboard" class="upload-button">🏆 View Leaderboard</a>
+    </div>
+
+    <div class="pagination" id="pagination-top">
+      <!-- Pagination will be inserted here -->
+    </div>
+
+    <div class="gallery" id="gallery">
+      <!-- Gallery items will be inserted here -->
+    </div>
+
+    <div class="pagination" id="pagination-bottom">
+      <!-- Pagination will be inserted here -->
+    </div>
+
+    <script src="/js/gallery.js"></script>
+  </body>
+</html>

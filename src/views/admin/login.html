@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Admin Login - pissandshitimages</title>
+    <link rel="stylesheet" href="/css/main.css" />
+    <link rel="stylesheet" href="/css/admin.css" />
+    <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  </head>
+  <body>
+    <script src="/oneko.js"></script>
+    <div class="login-container">
+      <h1>🔒 Admin Login - pissandshitimages</h1>
+      <form class="login-form" action="/admin/login" method="post">
+        <div
+          id="rate-limit-message"
+          class="rate-limit-message"
+          style="display: none"
+        >
+          ⚠️ Too many failed attempts. Please wait before trying again.
+        </div>
+        <div id="error-message" class="error-message" style="display: none">
+          <!-- Error message will be inserted here -->
+        </div>
+
+        <label for="username">Username:</label>
+        <input
+          type="text"
+          name="username"
+          id="username"
+          required
+          autocomplete="username"
+        />
+
+        <label for="password">Password:</label>
+        <input
+          type="password"
+          name="password"
+          id="password"
+          required
+          autocomplete="current-password"
+        />
+
+        <button type="submit">🔑 Login</button>
+      </form>
+    </div>
+  </body>
+</html>

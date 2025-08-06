@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Active Sessions - Admin Panel</title>
+    <link rel="stylesheet" href="/css/main.css" />
+    <link rel="stylesheet" href="/css/admin.css" />
+    <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  </head>
+  <body>
+    <script src="/oneko.js"></script>
+    <h1>🔐 Active Admin Sessions</h1>
+    <a href="/admin" class="nav-button">⬅️ Back to Admin Panel</a>
+
+    <div class="sessions-list">
+      <h2>Active Sessions (<span id="sessions-count">0</span> total)</h2>
+      <table>
+        <tr>
+          <th>Session ID</th>
+          <th>Created</th>
+          <th>Expires</th>
+          <th>IP Hash</th>
+          <th>User Agent</th>
+          <th>Actions</th>
+        </tr>
+        <tbody id="sessions-table">
+          <!-- Sessions will be inserted here -->
+        </tbody>
+      </table>
+      <div id="no-sessions" style="display: none">
+        <p>No active sessions found.</p>
+      </div>
+    </div>
+  </body>
+</html>

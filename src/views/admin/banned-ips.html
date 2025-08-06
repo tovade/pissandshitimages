@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Banned IPs - Admin Panel</title>
+    <link rel="stylesheet" href="/css/main.css" />
+    <link rel="stylesheet" href="/css/admin.css" />
+    <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+  </head>
+  <body>
+    <script src="/oneko.js"></script>
+    <h1>🚫 Banned IPs Management</h1>
+    <a href="/admin" class="nav-button">⬅️ Back to Admin Panel</a>
+
+    <div class="banned-list">
+      <h2>Banned IP Addresses (<span id="banned-count">0</span> total)</h2>
+      <table>
+        <tr>
+          <th>IP Hash</th>
+          <th>Banned Date</th>
+          <th>Banned By</th>
+          <th>Actions</th>
+        </tr>
+        <tbody id="banned-ips-table">
+          <!-- Banned IPs will be inserted here -->
+        </tbody>
+      </table>
+      <div id="no-banned-ips" style="display: none">
+        <p>No banned IPs found.</p>
+      </div>
+    </div>
+  </body>
+</html>
