@@ -8,7 +8,55 @@ CREATE TABLE images (
 	mimetype text NOT NULL
 );
 
+CREATE TABLE post_ips (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    post_id uuid NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    ip_hash text NOT NULL,
+    created_at timestamp DEFAULT NOW()
+);
+
+CREATE TABLE banned_ips (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    ip_hash text NOT NULL UNIQUE,
+    banned_at timestamp DEFAULT NOW(),
+    banned_by text DEFAULT 'admin'
+);
+
+
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+CREATE INDEX idx_post_ips_post_id ON post_ips(post_id);
+CREATE INDEX idx_post_ips_ip_hash ON post_ips(ip_hash);
+CREATE INDEX idx_banned_ips_ip_hash ON banned_ips(ip_hash);
+
+-- Create admin sessions table
+CREATE TABLE admin_sessions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_token text NOT NULL UNIQUE,
+    created_at timestamp DEFAULT NOW(),
+    expires_at timestamp NOT NULL,
+    ip_hash text,
+    user_agent text,
+    is_active boolean DEFAULT true
+);
+
+-- Create index for fast session lookups
+CREATE INDEX idx_admin_sessions_token ON admin_sessions(session_token);
+CREATE INDEX idx_admin_sessions_expires ON admin_sessions(expires_at);
+
+-- Create admin users table (in case you want multiple admins later)
+CREATE TABLE admin_users (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    username text NOT NULL UNIQUE,
+    password_hash text NOT NULL,
+    created_at timestamp DEFAULT NOW(),
+    is_active boolean DEFAULT true
+);
+
+-- Insert default admin user (you should change this password!)
+-- Password is 'admin123' - CHANGE THIS IMMEDIATELY!
+INSERT INTO admin_users (username, password_hash) 
+VALUES ('admin', '$2b$10$Ym9yzES/c/HMvuGN93/Dzu/4ZwWg2RWFtX8CATIR3bcOQzN4Vr43C');
 
 Thank you mom
 no problem sweetie */
@@ -23,6 +71,11 @@ const app = express();
 const upload = multer();
 const PORT = process.env.PORT || 3000;
 const cookieParser = require('cookie-parser');
+const crypto = require('crypto');
+const bcrypt = require('bcrypt');
+const path = require('path')
+
+app.use(express.static(path.join(process.cwd(), 'src', 'public')));
 
 if (process.env.LOCKED === 'true') {
 	app.use((req, res) => {
@@ -252,6 +305,76 @@ async function gamblingShitifyImage(buffer, mimetype) {
     return result
 }
 
+// Helper function to get client IP and hash it
+function getHashedIP(req) {
+  // Get the real IP address (handles proxies and load balancers)
+  const ip = req.headers['x-forwarded-for'] || 
+             req.headers['x-real-ip'] || 
+             req.connection.remoteAddress || 
+             req.socket.remoteAddress ||
+             (req.connection.socket ? req.connection.socket.remoteAddress : null);
+  
+  // Hash the IP with SHA256
+  return crypto.createHash('sha256').update(ip.toString()).digest('hex');
+}
+
+// Middleware to check if IP is banned
+async function checkBannedIP(req, res, next) {
+  try {
+    const ipHash = getHashedIP(req);
+    
+    const { data: bannedIP, error } = await supabase
+      .from('banned_ips')
+      .select('banned_at')
+      .eq('ip_hash', ipHash)
+      .single();
+    
+    if (bannedIP) {
+      return res.status(403).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Banned - pissandshitimages</title>
+            <style>
+                body {
+                    font-family: 'Comic Sans MS', cursive, sans-serif;
+                    background: #f0f0f0;
+                    margin: 0;
+                    padding: 20px;
+                    text-align: center;
+                }
+                h1 { color: #ff6b6b; font-size: 3em; }
+                .banned-message {
+                    background: #ff4757;
+                    color: white;
+                    padding: 20px;
+                    border-radius: 10px;
+                    margin: 20px auto;
+                    max-width: 600px;
+                }
+            </style>
+        </head>
+        <body>
+        <script src="/oneko.js"></script>
+            <h1>🚫 BANNED 🚫</h1>
+            <div class="banned-message">
+                <h2>Your IP has been banned!</h2>
+                <p>You were banned on: ${new Date(bannedIP.banned_at).toLocaleString()}</p>
+                <p>Reason: Inappropriate content upload</p>
+                <p>If you believe this is an error, contact the admin.</p>
+            </div>
+        </body>
+        </html>
+      `);
+    }
+    
+    next();
+  } catch (error) {
+    console.error('Error checking banned IP:', error);
+    next(); // Allow request to continue if there's an error
+  }
+}
+
 // ShareX Config download
 app.get('/sharexconfig', (req, res) => {
   const protocol = req.protocol;
@@ -340,6 +463,7 @@ app.get('/', (req, res) => {
         </style>
     </head>
     <body>
+        <script src="/oneko.js"></script>
         <h1>🚽 pissandshitimages - THE BEST IMAGE HOSTER EVER 💩</h1>
         <form action="/upload" method="post" enctype="multipart/form-data">
             <input type="file" name="image" required accept="image/*">
@@ -394,20 +518,39 @@ app.get('/', (req, res) => {
 
 
 // Handle upload
-app.post('/upload', upload.single('image'), async (req, res) => {
+app.post('/upload', checkBannedIP, upload.single('image'), async (req, res) => {
   if (!req.file) return res.status(400).send('No file uploaded.');
+  
   const { buffer, mimetype } = req.file;
   const result = await gamblingShitifyImage(buffer, mimetype);
   const base64 = result.buffer.toString('base64');
   const now = new Date().toISOString();
   const isHidden = req.body.hide === 'on';
   const customMimetype = `${result.mimetype};shitlevel=${result.gamblingResult};roll=${result.rollPercentage};date=${now};hidden=${isHidden}${isHidden ? ';message=🙈 THIS USER IS A COWARD WHO TRIED TO HIDE THEIR SHAME! 🙈' : ''}`;
+  
+  // Insert the image
   const { data, error } = await supabase
     .from('images')
     .insert([{ data: base64, mimetype: customMimetype }])
     .select('id')
     .single();
+    
   if (error) return res.status(500).send('DB error: ' + error.message);
+  
+  // Track the IP that uploaded this image
+  const ipHash = getHashedIP(req);
+  const { error: ipError } = await supabase
+    .from('post_ips')
+    .insert([{ 
+      post_id: data.id, 
+      ip_hash: ipHash 
+    }]);
+    
+  if (ipError) {
+    console.error('Failed to track IP:', ipError);
+    // Don't fail the upload if IP tracking fails
+  }
+  
   res.redirect(`/image/${data.id}`);
 });
 
@@ -495,6 +638,7 @@ app.get('/image/:id', async (req, res) => {
         </style>
     </head>
     <body>
+        <script src="/oneko.js"></script>
         <h1>🚽 pissandshitimages 💩</h1>
         <div class="image-container">
             <img src="${imageUrl}" alt="Shitified image" />
@@ -849,6 +993,7 @@ app.get('/gallery', async (req, res) => {
         </style>
     </head>
     <body>
+        <script src="/oneko.js"></script>
         <h1>🖼️ Gallery - pissandshitimages 💩</h1>
         <div class="stats-container">
             <div class="stats-grid">
@@ -897,18 +1042,85 @@ app.get('/gallery', async (req, res) => {
   `);
 });
 
-// Admin authentication middleware
-const authenticateAdmin = (req, res, next) => {
-  const isAuthenticated = req.cookies.adminAuth === 'true';
-  if (isAuthenticated) {
+
+// Helper function to generate secure session tokens
+function generateSessionToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+// Helper function to get client IP and hash it (reused from before)
+function getHashedIP(req) {
+  const ip = req.headers['x-forwarded-for'] || 
+             req.headers['x-real-ip'] || 
+             req.connection.remoteAddress || 
+             req.socket.remoteAddress ||
+             (req.connection.socket ? req.connection.socket.remoteAddress : null);
+  
+  return crypto.createHash('sha256').update(ip.toString()).digest('hex');
+}
+
+// Clean up expired sessions (run periodically)
+async function cleanupExpiredSessions() {
+  const { error } = await supabase
+    .from('admin_sessions')
+    .delete()
+    .lt('expires_at', new Date().toISOString());
+    
+  if (error) {
+    console.error('Failed to cleanup expired sessions:', error);
+  }
+}
+
+// Run cleanup every hour
+setInterval(cleanupExpiredSessions, 60 * 60 * 1000);
+
+// Secure admin authentication middleware
+const authenticateAdmin = async (req, res, next) => {
+  try {
+    const sessionToken = req.cookies.adminSession;
+    
+    if (!sessionToken) {
+      return res.redirect('/admin/login');
+    }
+
+    // Verify session in database
+    const { data: session, error } = await supabase
+      .from('admin_sessions')
+      .select('*')
+      .eq('session_token', sessionToken)
+      .eq('is_active', true)
+      .gt('expires_at', new Date().toISOString())
+      .single();
+
+    if (error || !session) {
+      // Invalid or expired session, clear cookie
+      res.clearCookie('adminSession');
+      return res.redirect('/admin/login');
+    }
+
+    // Optional: Check if IP matches (for extra security)
+    const currentIPHash = getHashedIP(req);
+    if (session.ip_hash && session.ip_hash !== currentIPHash) {
+      console.warn('Session IP mismatch detected');
+      // You can choose to invalidate session here or just log it
+      // For now, we'll allow it but log the warning
+    }
+
+    // Session is valid, attach session info to request
+    req.adminSession = session;
     next();
-  } else {
+  } catch (error) {
+    console.error('Admin auth error:', error);
+    res.clearCookie('adminSession');
     res.redirect('/admin/login');
   }
 };
 
 // Admin login page
 app.get('/admin/login', (req, res) => {
+  const error = req.query.error;
+  const rateLimited = req.query.rate_limited === 'true';
+  
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -930,39 +1142,73 @@ app.get('/admin/login', (req, res) => {
             }
             .login-form {
                 background: white;
-                padding: 20px;
+                padding: 30px;
                 border-radius: 10px;
                 box-shadow: 0 0 10px rgba(0,0,0,0.1);
                 display: inline-block;
                 margin-bottom: 20px;
+                max-width: 400px;
             }
-            input[type="password"] {
-                padding: 10px;
-                margin: 10px;
+            input[type="text"], input[type="password"] {
+                width: 100%;
+                padding: 12px;
+                margin: 10px 0;
                 border: 2px solid #ff6b6b;
                 border-radius: 5px;
                 font-size: 1.1em;
+                box-sizing: border-box;
             }
             button {
                 background: #ff6b6b;
                 color: white;
                 border: none;
-                padding: 10px 20px;
+                padding: 12px 24px;
                 border-radius: 5px;
                 font-size: 1.2em;
                 cursor: pointer;
                 transition: transform 0.1s;
+                width: 100%;
             }
             button:hover {
                 transform: scale(1.05);
+                background: #ff5252;
+            }
+            .error-message {
+                background: #ff4757;
+                color: white;
+                padding: 10px;
+                border-radius: 5px;
+                margin-bottom: 15px;
+            }
+            .rate-limit-message {
+                background: #ff9800;
+                color: white;
+                padding: 15px;
+                border-radius: 5px;
+                margin-bottom: 15px;
+            }
+            label {
+                display: block;
+                text-align: left;
+                margin-top: 15px;
+                margin-bottom: 5px;
+                font-weight: bold;
             }
         </style>
     </head>
     <body>
+        <script src="/oneko.js"></script>
         <h1>🔒 Admin Login - pissandshitimages</h1>
         <form class="login-form" action="/admin/login" method="post">
-            <input type="password" name="password" placeholder="Enter admin password" required>
-            <br>
+            ${rateLimited ? '<div class="rate-limit-message">⚠️ Too many failed attempts. Please wait before trying again.</div>' : ''}
+            ${error ? `<div class="error-message">❌ ${error}</div>` : ''}
+            
+            <label for="username">Username:</label>
+            <input type="text" name="username" id="username" required autocomplete="username">
+            
+            <label for="password">Password:</label>
+            <input type="password" name="password" id="password" required autocomplete="current-password">
+            
             <button type="submit">🔑 Login</button>
         </form>
     </body>
@@ -970,18 +1216,442 @@ app.get('/admin/login', (req, res) => {
   `);
 });
 
+// Rate limiting for login attempts
+const loginAttempts = new Map();
+
+function isRateLimited(ip) {
+  const attempts = loginAttempts.get(ip) || { count: 0, lastAttempt: 0 };
+  const now = Date.now();
+  const timeWindow = 15 * 60 * 1000; // 15 minutes
+  
+  // Reset counter if time window has passed
+  if (now - attempts.lastAttempt > timeWindow) {
+    attempts.count = 0;
+  }
+  
+  return attempts.count >= 5; // Max 5 attempts per 15 minutes
+}
+
+function recordLoginAttempt(ip, success = false) {
+  const attempts = loginAttempts.get(ip) || { count: 0, lastAttempt: 0 };
+  
+  if (success) {
+    // Clear attempts on successful login
+    loginAttempts.delete(ip);
+  } else {
+    attempts.count++;
+    attempts.lastAttempt = Date.now();
+    loginAttempts.set(ip, attempts);
+  }
+}
+
 // Handle admin login
-app.post('/admin/login', (req, res) => {
-  const { password } = req.body;
-  if (password === process.env.ADMIN_PASSWORD) {
-    res.cookie('adminAuth', 'true', { 
+app.post('/admin/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const clientIP = getHashedIP(req);
+    const userAgent = req.headers['user-agent'] || 'Unknown';
+    
+    // Check rate limiting
+    if (isRateLimited(clientIP)) {
+      return res.redirect('/admin/login?rate_limited=true');
+    }
+    
+    if (!username || !password) {
+      recordLoginAttempt(clientIP, false);
+      return res.redirect('/admin/login?error=Username and password are required');
+    }
+    
+    // Get admin user from database
+    const { data: adminUser, error: userError } = await supabase
+      .from('admin_users')
+      .select('*')
+      .eq('username', username)
+      .eq('is_active', true)
+      .single();
+    
+    if (userError || !adminUser) {
+      recordLoginAttempt(clientIP, false);
+      return res.redirect('/admin/login?error=Invalid username or password');
+    }
+    
+    // Verify password
+    const passwordValid = await bcrypt.compare(password, adminUser.password_hash);
+    
+    if (!passwordValid) {
+      recordLoginAttempt(clientIP, false);
+      return res.redirect('/admin/login?error=Invalid username or password');
+    }
+    
+    // Create new session
+    const sessionToken = generateSessionToken();
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 24); // 24 hour sessions
+    
+    const { error: sessionError } = await supabase
+      .from('admin_sessions')
+      .insert([{
+        session_token: sessionToken,
+        expires_at: expiresAt.toISOString(),
+        ip_hash: clientIP,
+        user_agent: userAgent
+      }]);
+    
+    if (sessionError) {
+      console.error('Failed to create session:', sessionError);
+      return res.redirect('/admin/login?error=Login failed. Please try again.');
+    }
+    
+    // Set secure session cookie
+    res.cookie('adminSession', sessionToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
       maxAge: 24 * 60 * 60 * 1000 // 24 hours
     });
+    
+    recordLoginAttempt(clientIP, true); // Clear rate limiting
     res.redirect('/admin');
+    
+  } catch (error) {
+    console.error('Login error:', error);
+    res.redirect('/admin/login?error=An error occurred. Please try again.');
+  }
+});
+
+// Admin logout
+app.get('/admin/logout', authenticateAdmin, async (req, res) => {
+  try {
+    const sessionToken = req.cookies.adminSession;
+    
+    if (sessionToken) {
+      // Invalidate session in database
+      await supabase
+        .from('admin_sessions')
+        .update({ is_active: false })
+        .eq('session_token', sessionToken);
+    }
+    
+    res.clearCookie('adminSession');
+    res.redirect('/admin/login');
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.clearCookie('adminSession');
+    res.redirect('/admin/login');
+  }
+});
+
+// Add session management page
+app.get('/admin/sessions', authenticateAdmin, async (req, res) => {
+  const { data: sessions, error } = await supabase
+    .from('admin_sessions')
+    .select('*')
+    .eq('is_active', true)
+    .order('created_at', { ascending: false });
+    
+  if (error) return res.status(500).send('DB error: ' + error.message);
+  
+  const currentSessionToken = req.cookies.adminSession;
+  
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Active Sessions - Admin Panel</title>
+        <style>
+            body {
+                font-family: 'Comic Sans MS', cursive, sans-serif;
+                background: #f0f0f0;
+                margin: 0;
+                padding: 20px;
+            }
+            h1 {
+                color: #ff6b6b;
+                text-shadow: 2px 2px 0 #000;
+                font-size: 2.5em;
+                margin-bottom: 30px;
+                text-align: center;
+            }
+            .sessions-list {
+                background: white;
+                padding: 20px;
+                border-radius: 10px;
+                box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            th, td {
+                padding: 10px;
+                border-bottom: 1px solid #ddd;
+                text-align: left;
+            }
+            th {
+                background: #ff6b6b;
+                color: white;
+            }
+            tr:nth-child(even) {
+                background: #f9f9f9;
+            }
+            .current-session {
+                background: #e8f5e8 !important;
+                font-weight: bold;
+            }
+            .revoke-btn {
+                background: #ff4757;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 3px;
+                cursor: pointer;
+            }
+            .revoke-btn:hover {
+                background: #ff6b6b;
+            }
+            .revoke-btn:disabled {
+                background: #ccc;
+                cursor: not-allowed;
+            }
+            .nav-button {
+                display: inline-block;
+                background: #ff6b6b;
+                color: white;
+                text-decoration: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+                margin-bottom: 20px;
+            }
+        </style>
+    </head>
+    <body>
+        <script src="/oneko.js"></script>
+        <h1>🔐 Active Admin Sessions</h1>
+        <a href="/admin" class="nav-button">⬅️ Back to Admin Panel</a>
+        
+        <div class="sessions-list">
+            <h2>Active Sessions (${sessions.length} total)</h2>
+            <table>
+                <tr>
+                    <th>Session ID</th>
+                    <th>Created</th>
+                    <th>Expires</th>
+                    <th>IP Hash</th>
+                    <th>User Agent</th>
+                    <th>Actions</th>
+                </tr>
+                ${sessions.map(session => `
+                    <tr class="${session.session_token === currentSessionToken ? 'current-session' : ''}">
+                        <td><code>${session.session_token.substring(0, 16)}...</code></td>
+                        <td>${new Date(session.created_at).toLocaleString()}</td>
+                        <td>${new Date(session.expires_at).toLocaleString()}</td>
+                        <td><code>${session.ip_hash ? session.ip_hash.substring(0, 8) + '...' : 'N/A'}</code></td>
+                        <td>${session.user_agent ? session.user_agent.substring(0, 50) + (session.user_agent.length > 50 ? '...' : '') : 'N/A'}</td>
+                        <td>
+                            ${session.session_token === currentSessionToken 
+                              ? '<span style="color: green;">Current Session</span>'
+                              : `<form action="/admin/revoke-session/${session.session_token}" method="post" style="display:inline;">
+                                   <button type="submit" class="revoke-btn" onclick="return confirm('Revoke this session?')">
+                                     🗑️ Revoke
+                                   </button>
+                                 </form>`
+                            }
+                        </td>
+                    </tr>
+                `).join('')}
+            </table>
+            ${sessions.length === 0 ? '<p>No active sessions found.</p>' : ''}
+        </div>
+    </body>
+    </html>
+  `);
+});
+
+// Revoke session
+app.post('/admin/revoke-session/:token', authenticateAdmin, async (req, res) => {
+  const { error } = await supabase
+    .from('admin_sessions')
+    .update({ is_active: false })
+    .eq('session_token', req.params.token);
+    
+  if (error) {
+    res.status(500).send('Error revoking session: ' + error.message);
   } else {
-    res.status(401).send('Invalid password');
+    res.redirect('/admin/sessions');
+  }
+});
+
+// Password change functionality
+app.get('/admin/change-password', authenticateAdmin, (req, res) => {
+  const error = req.query.error;
+  const success = req.query.success === 'true';
+  
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Change Password - Admin Panel</title>
+        <style>
+            body {
+                font-family: 'Comic Sans MS', cursive, sans-serif;
+                background: #f0f0f0;
+                margin: 0;
+                padding: 20px;
+                text-align: center;
+            }
+            h1 {
+                color: #ff6b6b;
+                text-shadow: 2px 2px 0 #000;
+                font-size: 2.5em;
+                margin-bottom: 30px;
+            }
+            .form-container {
+                background: white;
+                padding: 30px;
+                border-radius: 10px;
+                box-shadow: 0 0 10px rgba(0,0,0,0.1);
+                display: inline-block;
+                max-width: 400px;
+            }
+            input[type="password"] {
+                width: 100%;
+                padding: 12px;
+                margin: 10px 0;
+                border: 2px solid #ff6b6b;
+                border-radius: 5px;
+                font-size: 1.1em;
+                box-sizing: border-box;
+            }
+            button {
+                background: #ff6b6b;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 5px;
+                font-size: 1.2em;
+                cursor: pointer;
+                width: 100%;
+            }
+            button:hover {
+                background: #ff5252;
+            }
+            .error-message {
+                background: #ff4757;
+                color: white;
+                padding: 10px;
+                border-radius: 5px;
+                margin-bottom: 15px;
+            }
+            .success-message {
+                background: #4CAF50;
+                color: white;
+                padding: 10px;
+                border-radius: 5px;
+                margin-bottom: 15px;
+            }
+            label {
+                display: block;
+                text-align: left;
+                margin-top: 15px;
+                margin-bottom: 5px;
+                font-weight: bold;
+            }
+            .nav-button {
+                display: inline-block;
+                background: #4ecdc4;
+                color: white;
+                text-decoration: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+                margin-bottom: 20px;
+            }
+        </style>
+    </head>
+    <body>
+        <script src="/oneko.js"></script>
+        <h1>🔐 Change Admin Password</h1>
+        <a href="/admin" class="nav-button">⬅️ Back to Admin Panel</a>
+        
+        <form class="form-container" action="/admin/change-password" method="post">
+            ${success ? '<div class="success-message">✅ Password changed successfully!</div>' : ''}
+            ${error ? `<div class="error-message">❌ ${error}</div>` : ''}
+            
+            <label for="currentPassword">Current Password:</label>
+            <input type="password" name="currentPassword" id="currentPassword" required>
+            
+            <label for="newPassword">New Password:</label>
+            <input type="password" name="newPassword" id="newPassword" required minlength="8">
+            
+            <label for="confirmPassword">Confirm New Password:</label>
+            <input type="password" name="confirmPassword" id="confirmPassword" required minlength="8">
+            
+            <button type="submit">🔐 Change Password</button>
+        </form>
+    </body>
+    </html>
+  `);
+});
+
+app.post('/admin/change-password', authenticateAdmin, async (req, res) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+    
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.redirect('/admin/change-password?error=All fields are required');
+    }
+    
+    if (newPassword !== confirmPassword) {
+      return res.redirect('/admin/change-password?error=New passwords do not match');
+    }
+    
+    if (newPassword.length < 8) {
+      return res.redirect('/admin/change-password?error=Password must be at least 8 characters long');
+    }
+    
+    // Get current admin user (assuming username is 'admin' for now)
+    const { data: adminUser, error: userError } = await supabase
+      .from('admin_users')
+      .select('*')
+      .eq('username', 'admin')
+      .single();
+    
+    if (userError || !adminUser) {
+      return res.redirect('/admin/change-password?error=User not found');
+    }
+    
+    // Verify current password
+    const currentPasswordValid = await bcrypt.compare(currentPassword, adminUser.password_hash);
+    
+    if (!currentPasswordValid) {
+      return res.redirect('/admin/change-password?error=Current password is incorrect');
+    }
+    
+    // Hash new password
+    const newPasswordHash = await bcrypt.hash(newPassword, 10);
+    
+    // Update password in database
+    const { error: updateError } = await supabase
+      .from('admin_users')
+      .update({ password_hash: newPasswordHash })
+      .eq('id', adminUser.id);
+    
+    if (updateError) {
+      console.error('Failed to update password:', updateError);
+      return res.redirect('/admin/change-password?error=Failed to update password');
+    }
+    
+    // Invalidate all other sessions except current one
+    const currentSessionToken = req.cookies.adminSession;
+    await supabase
+      .from('admin_sessions')
+      .update({ is_active: false })
+      .neq('session_token', currentSessionToken);
+    
+    res.redirect('/admin/change-password?success=true');
+    
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.redirect('/admin/change-password?error=An error occurred');
   }
 });
 
@@ -992,7 +1662,11 @@ app.get('/admin', authenticateAdmin, async (req, res) => {
   const from = (page - 1) * perPage;
   const to = from + perPage - 1;
 
-  // Get paginated list without image data
+  // Check for success messages
+  const bannedSuccess = req.query.banned === 'success';
+  const deletedSuccess = req.query.deleted === 'success';
+  const visibilitySuccess = req.query.visibility === 'success';
+
   // Get all images for stats
   const { data: allImages, error: statsError } = await supabase
     .from('images')
@@ -1002,14 +1676,23 @@ app.get('/admin', authenticateAdmin, async (req, res) => {
 
   const stats = await getImageStats(allImages);
 
-  // Get paginated images without data column
+  // Get paginated images without data column, but also get IP tracking info
   const { data: images, count, error } = await supabase
     .from('images')
-    .select('id,mimetype', { count: 'exact' })
+    .select(`
+      id,
+      mimetype,
+      post_ips(ip_hash, created_at)
+    `, { count: 'exact' })
     .order('id', { ascending: false })
     .range(from, to);
 
   if (error) return res.status(500).send('DB error: ' + error.message);
+
+  // Get banned IPs count
+  const { count: bannedIPsCount } = await supabase
+    .from('banned_ips')
+    .select('*', { count: 'exact', head: true });
 
   const totalPages = Math.ceil(count / perPage);
 
@@ -1068,9 +1751,26 @@ app.get('/admin', authenticateAdmin, async (req, res) => {
                 padding: 5px 10px;
                 border-radius: 3px;
                 cursor: pointer;
+                margin-right: 5px;
             }
             .delete-btn:hover {
                 background: #ff6b6b;
+            }
+            .ban-btn {
+                background: #ff6b6b;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 3px;
+                cursor: pointer;
+                margin-right: 5px;
+            }
+            .ban-btn:hover {
+                background: #ff4757;
+            }
+            .ban-btn:disabled {
+                background: #ccc;
+                cursor: not-allowed;
             }
             .thumbnail {
                 max-width: 100px;
@@ -1153,10 +1853,52 @@ app.get('/admin', authenticateAdmin, async (req, res) => {
             .visibility-btn:hover {
                 opacity: 0.9;
             }
+            .success-message {
+                background: #4CAF50;
+                color: white;
+                padding: 15px;
+                border-radius: 5px;
+                margin-bottom: 20px;
+                text-align: center;
+            }
+            .nav-links {
+                text-align: center;
+                margin-bottom: 20px;
+            }
+            .nav-links a {
+                display: inline-block;
+                background: #4ecdc4;
+                color: white;
+                text-decoration: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+                margin: 0 10px;
+            }
+            .nav-links a:hover {
+                background: #45b7b0;
+            }
+            .ip-info {
+                color: #666;
+                font-size: 0.9em;
+                font-family: monospace;
+            }
         </style>
     </head>
     <body>
+        <script src="/oneko.js"></script>
         <h1>🛠️ Admin Panel - pissandshitimages</h1>
+        
+        <div class="nav-links">
+            <a href="/admin/banned-ips">🚫 View Banned IPs (${bannedIPsCount || 0})</a>
+            <a href="/admin/sessions">🔐 Active Sessions</a>
+            <a href="/admin/change-password">🔑 Change Password</a>
+            <a href="/gallery">🖼️ Gallery</a>
+            <a href="/admin/logout">🚪 Logout</a>
+        </div>
+        
+        ${bannedSuccess ? '<div class="success-message">✅ IP has been successfully banned!</div>' : ''}
+        ${deletedSuccess ? '<div class="success-message">✅ Image has been successfully deleted!</div>' : ''}
+        ${visibilitySuccess ? '<div class="success-message">✅ Image visibility has been successfully updated!</div>' : ''}
         
         <div class="stats">
             <h2>📊 Stats</h2>
@@ -1179,6 +1921,46 @@ app.get('/admin', authenticateAdmin, async (req, res) => {
                     <p>Total Size: ${(stats.totalSize / 1024 / 1024).toFixed(2)} MB</p>
                     <p>Avg Size: ${(stats.totalSize / stats.total / 1024).toFixed(2)} KB per image</p>
                 </div>
+                <div class="stat-box">
+                    <h3>🚫 Banned IPs</h3>
+                    <p>Total Banned: ${bannedIPsCount || 0}</p>
+                    <p><a href="/admin/banned-ips" style="color: #ff6b6b;">Manage Banned IPs →</a></p>
+                </div>
+            </div>
+            
+            <div style="margin-top: 20px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <h3 style="color: #ff6b6b; margin-top: 0;">🛠️ Image Management by ID</h3>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="text" id="imageIdInput" placeholder="Paste image ID here" required 
+                           style="flex: 1; padding: 10px; border: 2px solid #ff6b6b; border-radius: 5px;">
+                    
+                    <form action="/admin/delete-by-id" method="post" style="display: inline;">
+                        <input type="hidden" name="imageId" id="deleteImageId">
+                        <button type="submit" class="delete-btn" 
+                                style="padding: 10px 15px; background: #ff4757; color: white; border: none; border-radius: 5px; cursor: pointer;"
+                                onclick="document.getElementById('deleteImageId').value = document.getElementById('imageIdInput').value; return confirm('Are you sure you want to delete this image?')">
+                            🗑️ Delete
+                        </button>
+                    </form>
+                    
+                    <form action="/admin/toggle-visibility-by-id" method="post" style="display: inline;">
+                        <input type="hidden" name="imageId" id="toggleImageId">
+                        <button type="submit" class="visibility-btn visible" 
+                                style="padding: 10px 15px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;"
+                                onclick="document.getElementById('toggleImageId').value = document.getElementById('imageIdInput').value; return confirm('Are you sure you want to toggle the visibility of this image?')">
+                            👁️ Toggle Visibility
+                        </button>
+                    </form>
+                    
+                    <form action="/admin/ban-ip-by-id" method="post" style="display: inline;">
+                        <input type="hidden" name="imageId" id="banImageId">
+                        <button type="submit" class="ban-btn" 
+                                style="padding: 10px 15px; background: #ff6b6b; color: white; border: none; border-radius: 5px; cursor: pointer;"
+                                onclick="document.getElementById('banImageId').value = document.getElementById('imageIdInput').value; return confirm('Are you sure you want to ban the IP associated with this image? This will prevent them from uploading any more images.')">
+                            🚫 Ban IP
+                        </button>
+                    </form>
+                </div>
             </div>
         </div>
 
@@ -1190,6 +1972,7 @@ app.get('/admin', authenticateAdmin, async (req, res) => {
                     <th>ID</th>
                     <th>Shitification</th>
                     <th>Date</th>
+                    <th>IP Info</th>
                     <th>Actions</th>
                 </tr>
                 ${images.map(img => {
@@ -1204,6 +1987,10 @@ app.get('/admin', authenticateAdmin, async (req, res) => {
                   } else {
                     shitLevel = 'NORMAL SHIT';
                   }
+                  
+                  const hasIP = img.post_ips && img.post_ips.length > 0;
+                  const ipHash = hasIP ? img.post_ips[0].ip_hash : null;
+                  
                   return `
                     <tr>
                         <td><img src="/raw/${img.id}" class="thumbnail" loading="lazy" /></td>
@@ -1214,6 +2001,9 @@ app.get('/admin', authenticateAdmin, async (req, res) => {
                             </span>
                         </td>
                         <td>${new Date(metaObj.date).toLocaleString()}</td>
+                        <td class="ip-info">
+                            ${hasIP ? `${ipHash.substring(0, 8)}...` : 'No IP tracked'}
+                        </td>
                         <td>
                             <form action="/admin/toggle-visibility/${img.id}" method="post" style="display:inline;">
                                 <input type="hidden" name="currentState" value="${metaObj.hidden === 'true'}">
@@ -1221,8 +2011,15 @@ app.get('/admin', authenticateAdmin, async (req, res) => {
                                     ${metaObj.hidden === 'true' ? '👁️ Show' : '🕶️ Hide'}
                                 </button>
                             </form>
+                            ${hasIP ? `
+                                <form action="/admin/ban-ip/${img.id}" method="post" style="display:inline;">
+                                    <button type="submit" class="ban-btn" onclick="return confirm('Are you sure you want to ban this IP? This will prevent them from uploading any more images.')">
+                                        🚫 Ban IP
+                                    </button>
+                                </form>
+                            ` : '<button class="ban-btn" disabled>🚫 No IP</button>'}
                             <form action="/admin/delete/${img.id}" method="post" style="display:inline;">
-                                <button type="submit" class="delete-btn">🗑️ Delete</button>
+                                <button type="submit" class="delete-btn" onclick="return confirm('Are you sure you want to delete this image?')">🗑️ Delete</button>
                             </form>
                         </td>
                     </tr>
@@ -1241,6 +2038,162 @@ app.get('/admin', authenticateAdmin, async (req, res) => {
                 }).join('')}
                 ${page < totalPages ? `<a href="/admin?page=${page + 1}">Next ➡️</a>` : '<a class="disabled">Next ➡️</a>'}
             </div>
+        </div>
+    </body>
+    </html>
+  `);
+});
+
+
+// Add ban IP functionality to admin panel
+app.post('/admin/ban-ip/:id', authenticateAdmin, async (req, res) => {
+  try {
+    // Get the IP hash for this post
+    const { data: postIP, error: getIPError } = await supabase
+      .from('post_ips')
+      .select('ip_hash')
+      .eq('post_id', req.params.id)
+      .single();
+      
+    if (getIPError || !postIP) {
+      return res.status(404).send('IP not found for this post');
+    }
+    
+    // Add IP to banned list
+    const { error: banError } = await supabase
+      .from('banned_ips')
+      .insert([{ ip_hash: postIP.ip_hash }]);
+      
+    if (banError) {
+      // IP might already be banned
+      if (banError.code === '23505') { // unique violation
+        return res.status(400).send('IP is already banned');
+      }
+      return res.status(500).send('Error banning IP: ' + banError.message);
+    }
+    
+    res.redirect('/admin?banned=success');
+  } catch (error) {
+    res.status(500).send('Error: ' + error.message);
+  }
+});
+
+// Add unban IP functionality
+app.post('/admin/unban-ip/:hash', authenticateAdmin, async (req, res) => {
+  const { error } = await supabase
+    .from('banned_ips')
+    .delete()
+    .eq('ip_hash', req.params.hash);
+    
+  if (error) {
+    res.status(500).send('Error unbanning IP: ' + error.message);
+  } else {
+    res.redirect('/admin/banned-ips');
+  }
+});
+
+// Add banned IPs management page
+app.get('/admin/banned-ips', authenticateAdmin, async (req, res) => {
+  const { data: bannedIPs, error } = await supabase
+    .from('banned_ips')
+    .select('*')
+    .order('banned_at', { ascending: false });
+    
+  if (error) return res.status(500).send('DB error: ' + error.message);
+  
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Banned IPs - Admin Panel</title>
+        <style>
+            body {
+                font-family: 'Comic Sans MS', cursive, sans-serif;
+                background: #f0f0f0;
+                margin: 0;
+                padding: 20px;
+            }
+            h1 {
+                color: #ff6b6b;
+                text-shadow: 2px 2px 0 #000;
+                font-size: 2.5em;
+                margin-bottom: 30px;
+                text-align: center;
+            }
+            .banned-list {
+                background: white;
+                padding: 20px;
+                border-radius: 10px;
+                box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            th, td {
+                padding: 10px;
+                border-bottom: 1px solid #ddd;
+                text-align: left;
+            }
+            th {
+                background: #ff6b6b;
+                color: white;
+            }
+            tr:nth-child(even) {
+                background: #f9f9f9;
+            }
+            .unban-btn {
+                background: #4CAF50;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 3px;
+                cursor: pointer;
+            }
+            .unban-btn:hover {
+                background: #45a049;
+            }
+            .nav-button {
+                display: inline-block;
+                background: #ff6b6b;
+                color: white;
+                text-decoration: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+                margin-bottom: 20px;
+            }
+        </style>
+    </head>
+    <body>
+        <script src="/oneko.js"></script>
+        <h1>🚫 Banned IPs Management</h1>
+        <a href="/admin" class="nav-button">⬅️ Back to Admin Panel</a>
+        
+        <div class="banned-list">
+            <h2>Banned IP Addresses (${bannedIPs.length} total)</h2>
+            <table>
+                <tr>
+                    <th>IP Hash</th>
+                    <th>Banned Date</th>
+                    <th>Banned By</th>
+                    <th>Actions</th>
+                </tr>
+                ${bannedIPs.map(ban => `
+                    <tr>
+                        <td><code>${ban.ip_hash.substring(0, 16)}...</code></td>
+                        <td>${new Date(ban.banned_at).toLocaleString()}</td>
+                        <td>${ban.banned_by}</td>
+                        <td>
+                            <form action="/admin/unban-ip/${ban.ip_hash}" method="post" style="display:inline;">
+                                <button type="submit" class="unban-btn" onclick="return confirm('Are you sure you want to unban this IP?')">
+                                    🔓 Unban
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                `).join('')}
+            </table>
+            ${bannedIPs.length === 0 ? '<p>No banned IPs found.</p>' : ''}
         </div>
     </body>
     </html>
@@ -1303,6 +2256,444 @@ app.post('/admin/delete/:id', authenticateAdmin, async (req, res) => {
   }
 });
 
+// Toggle image visibility by ID (from form input)
+app.post('/admin/toggle-visibility-by-id', authenticateAdmin, async (req, res) => {
+  const { imageId } = req.body;
+  
+  if (!imageId) {
+    return res.status(400).send('Image ID is required');
+  }
+  
+  try {
+    // Check if the image exists first
+    const { data: image, error: getError } = await supabase
+      .from('images')
+      .select('mimetype')
+      .eq('id', imageId)
+      .single();
+    
+    if (getError || !image) {
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Error - Image Not Found</title>
+            <style>
+                body {
+                    font-family: 'Comic Sans MS', cursive, sans-serif;
+                    background: #f0f0f0;
+                    margin: 0;
+                    padding: 20px;
+                    text-align: center;
+                }
+                h1 { color: #ff6b6b; font-size: 2em; }
+                .error-box {
+                    background: #ff4757;
+                    color: white;
+                    padding: 20px;
+                    border-radius: 10px;
+                    margin: 20px auto;
+                    max-width: 600px;
+                }
+                a {
+                    display: inline-block;
+                    background: #4ecdc4;
+                    color: white;
+                    text-decoration: none;
+                    padding: 10px 20px;
+                    border-radius: 5px;
+                    margin-top: 20px;
+                }
+            </style>
+        </head>
+        <body>
+        <script src="/oneko.js"></script>
+            <h1>❌ Error: Image Not Found</h1>
+            <div class="error-box">
+                <p>The image with ID <strong>${imageId}</strong> was not found in the database.</p>
+                <p>Please check the ID and try again.</p>
+            </div>
+            <a href="/admin">⬅️ Back to Admin Panel</a>
+        </body>
+        </html>
+      `);
+    }
+    
+    // Parse the mimetype to get metadata
+    const [baseMimetype, ...meta] = image.mimetype.split(';');
+    const metaObj = Object.fromEntries(meta.map(s => s.split('=')));
+    const currentlyHidden = metaObj.hidden === 'true';
+    
+    // Toggle the hidden state
+    metaObj.hidden = (!currentlyHidden).toString();
+    
+    // Update or add the message
+    if (!currentlyHidden) {
+      metaObj.message = '🙈 THIS USER IS A COWARD WHO TRIED TO HIDE THEIR SHAME! 🙈';
+    } else {
+      delete metaObj.message;
+    }
+
+    // Reconstruct mimetype string
+    const newMimetype = [baseMimetype, ...Object.entries(metaObj).map(([k, v]) => `${k}=${v}`)].join(';');
+
+    // Update the image
+    const { error: updateError } = await supabase
+      .from('images')
+      .update({ mimetype: newMimetype })
+      .eq('id', imageId);
+    
+    if (updateError) {
+      throw new Error(updateError.message);
+    }
+    
+    // Redirect back to admin panel with success message
+    res.redirect('/admin?visibility=success');
+    
+  } catch (error) {
+    console.error('Error toggling image visibility by ID:', error);
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <title>Error - Visibility Toggle Failed</title>
+          <style>
+              body {
+                  font-family: 'Comic Sans MS', cursive, sans-serif;
+                  background: #f0f0f0;
+                  margin: 0;
+                  padding: 20px;
+                  text-align: center;
+              }
+              h1 { color: #ff6b6b; font-size: 2em; }
+              .error-box {
+                  background: #ff4757;
+                  color: white;
+                  padding: 20px;
+                  border-radius: 10px;
+                  margin: 20px auto;
+                  max-width: 600px;
+              }
+              a {
+                  display: inline-block;
+                  background: #4ecdc4;
+                  color: white;
+                  text-decoration: none;
+                  padding: 10px 20px;
+                  border-radius: 5px;
+                  margin-top: 20px;
+              }
+          </style>
+      </head>
+      <body>
+        <script src="/oneko.js"></script>
+          <h1>❌ Error: Visibility Toggle Failed</h1>
+          <div class="error-box">
+              <p>Failed to toggle visibility for image with ID <strong>${imageId}</strong>.</p>
+              <p>Error: ${error.message}</p>
+          </div>
+          <a href="/admin">⬅️ Back to Admin Panel</a>
+      </body>
+      </html>
+    `);
+  }
+});
+
+// Delete image by ID (from form input)
+app.post('/admin/delete-by-id', authenticateAdmin, async (req, res) => {
+  const { imageId } = req.body;
+  
+  if (!imageId) {
+    return res.status(400).send('Image ID is required');
+  }
+  
+  try {
+    // Check if the image exists first
+    const { data, error: checkError } = await supabase
+      .from('images')
+      .select('id')
+      .eq('id', imageId)
+      .single();
+    
+    if (checkError || !data) {
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Error - Image Not Found</title>
+            <style>
+                body {
+                    font-family: 'Comic Sans MS', cursive, sans-serif;
+                    background: #f0f0f0;
+                    margin: 0;
+                    padding: 20px;
+                    text-align: center;
+                }
+                h1 { color: #ff6b6b; font-size: 2em; }
+                .error-box {
+                    background: #ff4757;
+                    color: white;
+                    padding: 20px;
+                    border-radius: 10px;
+                    margin: 20px auto;
+                    max-width: 600px;
+                }
+                a {
+                    display: inline-block;
+                    background: #4ecdc4;
+                    color: white;
+                    text-decoration: none;
+                    padding: 10px 20px;
+                    border-radius: 5px;
+                    margin-top: 20px;
+                }
+            </style>
+        </head>
+        <body>
+        <script src="/oneko.js"></script>
+            <h1>❌ Error: Image Not Found</h1>
+            <div class="error-box">
+                <p>The image with ID <strong>${imageId}</strong> was not found in the database.</p>
+                <p>Please check the ID and try again.</p>
+            </div>
+            <a href="/admin">⬅️ Back to Admin Panel</a>
+        </body>
+        </html>
+      `);
+    }
+    
+    // Delete the image
+    const { error: deleteError } = await supabase
+      .from('images')
+      .delete()
+      .eq('id', imageId);
+    
+    if (deleteError) {
+      throw new Error(deleteError.message);
+    }
+    
+    // Redirect back to admin panel with success message
+    res.redirect('/admin?deleted=success');
+    
+  } catch (error) {
+    console.error('Error deleting image by ID:', error);
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <title>Error - Delete Failed</title>
+          <style>
+              body {
+                  font-family: 'Comic Sans MS', cursive, sans-serif;
+                  background: #f0f0f0;
+                  margin: 0;
+                  padding: 20px;
+                  text-align: center;
+              }
+              h1 { color: #ff6b6b; font-size: 2em; }
+              .error-box {
+                  background: #ff4757;
+                  color: white;
+                  padding: 20px;
+                  border-radius: 10px;
+                  margin: 20px auto;
+                  max-width: 600px;
+              }
+              a {
+                  display: inline-block;
+                  background: #4ecdc4;
+                  color: white;
+                  text-decoration: none;
+                  padding: 10px 20px;
+                  border-radius: 5px;
+                  margin-top: 20px;
+              }
+          </style>
+      </head>
+      <body>
+        <script src="/oneko.js"></script>
+          <h1>❌ Error: Delete Failed</h1>
+          <div class="error-box">
+              <p>Failed to delete image with ID <strong>${imageId}</strong>.</p>
+              <p>Error: ${error.message}</p>
+          </div>
+          <a href="/admin">⬅️ Back to Admin Panel</a>
+      </body>
+      </html>
+    `);
+  }
+});
+
+// Ban IP by image ID (from form input)
+app.post('/admin/ban-ip-by-id', authenticateAdmin, async (req, res) => {
+  const { imageId } = req.body;
+  
+  if (!imageId) {
+    return res.status(400).send('Image ID is required');
+  }
+  
+  try {
+    // Get the IP hash for this post
+    const { data: postIP, error: getIPError } = await supabase
+      .from('post_ips')
+      .select('ip_hash')
+      .eq('post_id', imageId)
+      .single();
+      
+    if (getIPError || !postIP) {
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Error - IP Not Found</title>
+            <style>
+                body {
+                    font-family: 'Comic Sans MS', cursive, sans-serif;
+                    background: #f0f0f0;
+                    margin: 0;
+                    padding: 20px;
+                    text-align: center;
+                }
+                h1 { color: #ff6b6b; font-size: 2em; }
+                .error-box {
+                    background: #ff4757;
+                    color: white;
+                    padding: 20px;
+                    border-radius: 10px;
+                    margin: 20px auto;
+                    max-width: 600px;
+                }
+                a {
+                    display: inline-block;
+                    background: #4ecdc4;
+                    color: white;
+                    text-decoration: none;
+                    padding: 10px 20px;
+                    border-radius: 5px;
+                    margin-top: 20px;
+                }
+            </style>
+        </head>
+        <body>
+        <script src="/oneko.js"></script>
+            <h1>❌ Error: IP Not Found</h1>
+            <div class="error-box">
+                <p>No IP address was found for the image with ID <strong>${imageId}</strong>.</p>
+                <p>This image may not have IP tracking information.</p>
+            </div>
+            <a href="/admin">⬅️ Back to Admin Panel</a>
+        </body>
+        </html>
+      `);
+    }
+    
+    // Add IP to banned list
+    const { error: banError } = await supabase
+      .from('banned_ips')
+      .insert([{ ip_hash: postIP.ip_hash }]);
+      
+    if (banError) {
+      // IP might already be banned
+      if (banError.code === '23505') { // unique violation
+        return res.status(400).send(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Error - IP Already Banned</title>
+              <style>
+                  body {
+                      font-family: 'Comic Sans MS', cursive, sans-serif;
+                      background: #f0f0f0;
+                      margin: 0;
+                      padding: 20px;
+                      text-align: center;
+                  }
+                  h1 { color: #ff6b6b; font-size: 2em; }
+                  .error-box {
+                      background: #ff9800;
+                      color: white;
+                      padding: 20px;
+                      border-radius: 10px;
+                      margin: 20px auto;
+                      max-width: 600px;
+                  }
+                  a {
+                      display: inline-block;
+                      background: #4ecdc4;
+                      color: white;
+                      text-decoration: none;
+                      padding: 10px 20px;
+                      border-radius: 5px;
+                      margin-top: 20px;
+                  }
+              </style>
+          </head>
+          <body>
+          <script src="/oneko.js"></script>
+              <h1>⚠️ IP Already Banned</h1>
+              <div class="error-box">
+                  <p>The IP address associated with image ID <strong>${imageId}</strong> is already banned.</p>
+              </div>
+              <a href="/admin">⬅️ Back to Admin Panel</a>
+          </body>
+          </html>
+        `);
+      }
+      throw new Error(banError.message);
+    }
+    
+    // Redirect back to admin panel with success message
+    res.redirect('/admin?banned=success');
+    
+  } catch (error) {
+    console.error('Error banning IP by image ID:', error);
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <title>Error - Ban Failed</title>
+          <style>
+              body {
+                  font-family: 'Comic Sans MS', cursive, sans-serif;
+                  background: #f0f0f0;
+                  margin: 0;
+                  padding: 20px;
+                  text-align: center;
+              }
+              h1 { color: #ff6b6b; font-size: 2em; }
+              .error-box {
+                  background: #ff4757;
+                  color: white;
+                  padding: 20px;
+                  border-radius: 10px;
+                  margin: 20px auto;
+                  max-width: 600px;
+              }
+              a {
+                  display: inline-block;
+                  background: #4ecdc4;
+                  color: white;
+                  text-decoration: none;
+                  padding: 10px 20px;
+                  border-radius: 5px;
+                  margin-top: 20px;
+              }
+          </style>
+      </head>
+      <body>
+        <script src="/oneko.js"></script>
+          <h1>❌ Error: Ban Failed</h1>
+          <div class="error-box">
+              <p>Failed to ban IP for image with ID <strong>${imageId}</strong>.</p>
+              <p>Error: ${error.message}</p>
+          </div>
+          <a href="/admin">⬅️ Back to Admin Panel</a>
+      </body>
+      </html>
+    `);
+  }
+});
+
 // Admin logout
 app.get('/admin/logout', (req, res) => {
   res.clearCookie('adminAuth');
@@ -1311,6 +2702,10 @@ app.get('/admin/logout', (req, res) => {
 
 // Leaderboard page
 app.get('/leaderboard', async (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const perPage = 20;
+  
+  // First, get all images for stats (metadata only)
   const { data, error } = await supabase
     .from('images')
     .select('id,mimetype')
@@ -1319,7 +2714,7 @@ app.get('/leaderboard', async (req, res) => {
   if (error) return res.status(500).send('DB error: ' + error.message);
   
   // Filter out hidden images and parse roll percentages
-  const rankedImages = (data || [])
+  const visibleImages = (data || [])
     .filter(img => {
       const [_, ...meta] = img.mimetype.split(';');
       const metaObj = Object.fromEntries(meta.map(s => s.split('=')));
@@ -1345,6 +2740,71 @@ app.get('/leaderboard', async (req, res) => {
       };
     })
     .sort((a, b) => b.roll - a.roll); // Sort by roll percentage, highest first
+    
+  // Calculate pagination values
+  const totalImages = visibleImages.length;
+  const totalPages = Math.ceil(totalImages / perPage);
+  const startIndex = (page - 1) * perPage;
+  const endIndex = startIndex + perPage;
+  
+  // Get the images for the current page
+  const rankedImages = visibleImages.slice(startIndex, endIndex);
+  
+  // Generate pagination HTML
+  const generatePagination = () => {
+    let paginationHTML = '';
+    
+    // Previous button
+    if (page > 1) {
+      paginationHTML += `<a href="/leaderboard?page=${page - 1}" class="prev-next">⬅️ Previous</a>`;
+    } else {
+      paginationHTML += `<span class="prev-next disabled">⬅️ Previous</span>`;
+    }
+
+    // Page numbers
+    const startPage = Math.max(1, page - 2);
+    const endPage = Math.min(totalPages, page + 2);
+
+    // First page and ellipsis if needed
+    if (startPage > 1) {
+      paginationHTML += `<a href="/leaderboard?page=1">1</a>`;
+      if (startPage > 2) {
+        paginationHTML += `<span class="ellipsis">...</span>`;
+      }
+    }
+
+    // Page range around current page
+    for (let i = startPage; i <= endPage; i++) {
+      if (i === page) {
+        paginationHTML += `<span class="current">${i}</span>`;
+      } else {
+        paginationHTML += `<a href="/leaderboard?page=${i}">${i}</a>`;
+      }
+    }
+
+    // Last page and ellipsis if needed
+    if (endPage < totalPages) {
+      if (endPage < totalPages - 1) {
+        paginationHTML += `<span class="ellipsis">...</span>`;
+      }
+      paginationHTML += `<a href="/leaderboard?page=${totalPages}">${totalPages}</a>`;
+    }
+
+    // Next button
+    if (page < totalPages) {
+      paginationHTML += `<a href="/leaderboard?page=${page + 1}" class="prev-next">Next ➡️</a>`;
+    } else {
+      paginationHTML += `<span class="prev-next disabled">Next ➡️</span>`;
+    }
+
+    return paginationHTML;
+  };
+  
+  // Calculate the global rank for each image on the current page
+  const rankedImagesWithGlobalRank = rankedImages.map((img, index) => {
+    const globalRank = startIndex + index + 1; // +1 because ranks start at 1, not 0
+    return { ...img, globalRank };
+  })
 
   res.send(`
     <!DOCTYPE html>
@@ -1438,21 +2898,87 @@ app.get('/leaderboard', async (req, res) => {
                 transform: scale(1.05);
                 background: #ff5252;
             }
+            .pagination {
+                margin: 30px 0;
+                text-align: center;
+            }
+            .pagination a, .pagination span {
+                display: inline-block;
+                padding: 10px 15px;
+                margin: 0 5px;
+                text-decoration: none;
+                border-radius: 5px;
+                transition: all 0.2s;
+            }
+            .pagination a {
+                background: #ff6b6b;
+                color: white;
+            }
+            .pagination a:hover {
+                background: #ff5252;
+                transform: scale(1.05);
+            }
+            .pagination .current {
+                background: #ff5252;
+                color: white;
+                font-weight: bold;
+            }
+            .pagination .disabled {
+                background: #cccccc;
+                color: #999;
+                cursor: not-allowed;
+            }
+            .pagination .prev-next {
+                background: #4ecdc4;
+                font-weight: bold;
+            }
+            .pagination .prev-next:hover {
+                background: #45b7b0;
+            }
+            .pagination .prev-next.disabled {
+                background: #cccccc;
+                color: #999;
+            }
+            .pagination .ellipsis {
+                background: none;
+                color: #666;
+                cursor: default;
+            }
+            .page-info {
+                background: white;
+                padding: 15px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                margin-bottom: 20px;
+                max-width: 1000px;
+                margin-left: auto;
+                margin-right: auto;
+            }
         </style>
     </head>
     <body>
+        <script src="/oneko.js"></script>
         <h1>🏆 Shitification Leaderboard 💩</h1>
         <div class="nav-buttons">
             <a href="/" class="nav-button">🏠 Home</a>
             <a href="/gallery" class="nav-button">🖼️ Gallery</a>
         </div>
+        
+        <div class="page-info">
+            <p>Showing ${startIndex + 1}-${Math.min(startIndex + rankedImages.length, totalImages)} of ${totalImages} images</p>
+        </div>
+        
+        <div class="pagination">
+            ${generatePagination()}
+        </div>
+        
         <div class="leaderboard">
-            ${rankedImages.map((img, index) => `
+            ${rankedImagesWithGlobalRank.map((img, index) => `
                 <div class="image-row">
-                    <div class="rank ${index < 3 ? 'medal-' + (index + 1) : ''}">${index + 1}</div>
+                    <div class="rank ${img.globalRank <= 3 ? 'medal-' + img.globalRank : ''}">${img.globalRank}</div>
                     <div class="image-wrapper">
                         <a href="/image/${img.id}">
-                            <img src="/raw/${img.id}" alt="Rank ${index + 1}" />
+                            <img src="/raw/${img.id}" alt="Rank ${img.globalRank}" />
                         </a>
                     </div>
                     <div class="info">
@@ -1462,6 +2988,10 @@ app.get('/leaderboard', async (req, res) => {
                     </div>
                 </div>
             `).join('')}
+        </div>
+        
+        <div class="pagination">
+            ${generatePagination()}
         </div>
     </body>
     </html>
