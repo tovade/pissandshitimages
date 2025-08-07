@@ -393,32 +393,44 @@ a:hover {
 
 /* Leaderboard Styles */
 .leaderboard {
-  max-width: 1000px;
+  max-width: 1400px;
   margin: 0 auto;
   background: white;
   padding: 20px;
   border-radius: 10px;
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 15px;
 }
 
 .image-row {
   display: flex;
   align-items: center;
   padding: 15px;
-  border-bottom: 1px solid #eee;
+  border: 1px solid #eee;
+  border-radius: 8px;
   transition: transform 0.2s;
+  background: #fafafa;
 }
 
 .image-row:hover {
   transform: scale(1.02);
-  background: #f9f9f9;
+  background: #f0f0f0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.image-row:last-child {
+  border: 1px solid #eee;
 }
 
 .rank {
-  font-size: 2em;
+  font-size: 1.8em;
   font-weight: bold;
-  width: 60px;
+  width: 50px;
   color: #ff6b6b;
+  text-align: center;
+  flex-shrink: 0;
 }
 
 .medal-1 {
@@ -432,35 +444,65 @@ a:hover {
 } /* Bronze */
 
 .leaderboard .image-wrapper {
-  width: 100px;
-  height: 75px;
-  margin: 0 15px;
+  width: 80px;
+  height: 60px;
+  margin: 0 10px;
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+  border-radius: 5px;
+}
+
+.leaderboard .image-wrapper a {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: none;
+  padding: 0;
+  display: block;
+}
+
+.leaderboard .image-wrapper a:hover {
+  background: none;
 }
 
 .leaderboard .image-wrapper img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   border-radius: 5px;
 }
 
 .leaderboard .info {
   flex-grow: 1;
   text-align: left;
+  margin-left: 10px;
 }
 
 .roll {
-  font-size: 1.2em;
+  font-size: 1em;
   font-weight: bold;
   color: #ff6b6b;
+  margin-bottom: 3px;
 }
 
 .shitlevel {
-  margin-top: 5px;
+  margin: 3px 0;
   color: #666;
+  font-size: 0.9em;
 }
 
 .leaderboard .date {
   color: #999;
+  font-size: 0.8em;
+  margin-top: 3px;
+}
+
+.views {
+  color: #4ecdc4;
+  font-weight: bold;
+  margin-top: 3px;
   font-size: 0.9em;
 }
